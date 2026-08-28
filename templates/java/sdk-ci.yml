@@ -1,0 +1,35 @@
+# SDK 仓 .github/workflows/ci.yml 模板
+# workers-world actions bundle: actions/v0.4.34（禁止 @master）
+name: CI
+
+on:
+  push:
+    branches: ["dev_*"]
+  pull_request:
+    branches: ["master"]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  packages: write
+
+# concurrency 由 java-maven-sdk-ci reusable 负责（经 concurrency_group）；caller 勿再声明同名 group，否则与嵌套 workflow 死锁。
+
+jobs:
+  ci:
+    uses: workers-world/java-actions/.github/workflows/java-maven-sdk-ci.yml@actions/v0.5.0
+    secrets:
+      GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
+      WORKERS_WORLD_GHA_TOKEN: ${{ secrets.WORKERS_WORLD_GHA_TOKEN }}
+    with:
+      # 本仓仓库名与 pom distributionManagement <id>
+      github_packages_repo: db-init-flyway-spring-boot-starter
+      server_id: github-db-init-flyway
+      # reusable 内 event_name 恒为 workflow_call；在此判定是否 publish
+      publish_on_push: ${{ github.event_name == 'push' && startsWith(github.ref_name, 'dev_') && github.ref_type == 'branch' }}
+      concurrency_group: sdk-ci-${{ github.repository }}-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+      # 无外部 workers-world 依赖时留空；framework-sdk-llm 示例：
+      # github_packages_repos_for_verify: framework-sdk:github-framework-sdk
+      github_packages_repos_for_verify: ""
+      maven_goals: verify
+      maven_deploy_args: -DskipTests

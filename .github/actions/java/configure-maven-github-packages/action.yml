@@ -1,0 +1,143 @@
+name: Configure Maven GitHub Packages
+description: >-
+  写入 ~/.m2/settings.xml，供 workers-world（或其它 org）多仓 Maven 包鉴权。
+  settings.xml 含明文 token：应在非持久化 runner 上使用，并在 maven 步骤完成后 rm -f ~/.m2/settings.xml
+inputs:
+  owner:
+    description: GitHub Packages 所属 owner（org 或 user），仅用于日志展示；鉴权依赖 server id 与 pom 对齐，与 owner 无关
+    required: false
+    default: ""
+  package_repos:
+    description: 逗号分隔的仓库名或 repo:serverId（写入 settings.xml 的 server id；须与 pom repository/distributionManagement id 一致）。纯仓库名默认映射为 github-<repo>（如 framework-sdk → github-framework-sdk）；自定义 id 请用 repo:serverId
+    required: true
+  server_username:
+    description: Maven server 用户名（Actions 中通常为 github.actor）
+    required: true
+  server_password:
+    description: >-
+      PAT 或 GITHUB_TOKEN（须含 read:packages；publish 须 write:packages）。
+      Caller 须声明最小 permissions，例如 permissions: { contents: read, packages: write }（verify 场景 packages: read 即可）。
+      密码会明文写入 runner ~/.m2/settings.xml；调用方须在 maven 步骤后 rm -f ~/.m2/settings.xml（自托管 runner 尤其重要）
+    required: true
+  overwrite:
+    description: 已存在 settings.xml 时是否覆盖（true=覆盖并备份为 settings.xml.bak；false=直接失败）
+    required: false
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Write Maven settings.xml
+      shell: bash
+      env:
+        OWNER: ${{ inputs.owner }}
+        PACKAGE_REPOS: ${{ inputs.package_repos }}
+        MAVEN_USER: ${{ inputs.server_username }}
+        MAVEN_PASSWORD: ${{ inputs.server_password }}
+        OVERWRITE: ${{ inputs.overwrite }}
+      run: |
+        set -euo pipefail
+        umask 077
+        mkdir -p "$HOME/.m2"
+        chmod 700 "$HOME/.m2"
+        if [ -z "${MAVEN_USER:-}" ] || [ -z "${MAVEN_PASSWORD:-}" ]; then
+          echo "::error::server_username and server_password must be non-empty" >&2
+          exit 1
+        fi
+        # 去掉凭据中的控制字符（含 CR/LF），避免粘贴 secret 带入尾随换行导致鉴权失败
+        MAVEN_USER="$(printf '%s' "$MAVEN_USER" | tr -d '\000-\010\012\013\014\015\016-\037')"
+        MAVEN_PASSWORD="$(printf '%s' "$MAVEN_PASSWORD" | tr -d '\000-\010\012\013\014\015\016-\037')"
+        # 清洗后的值可能与原始 secret 不一致，GitHub 自动遮蔽无法覆盖，需显式 mask
+        echo "::add-mask::${MAVEN_USER//'%'/%25}"
+        echo "::add-mask::${MAVEN_PASSWORD//'%'/%25}"
+        if [ -z "$MAVEN_USER" ] || [ -z "$MAVEN_PASSWORD" ]; then
+          echo "::error::server_username/server_password empty after stripping control characters" >&2
+          exit 1
+        fi
+        xml_escape() {
+          local s="$1"
+          # replacement 中的 & 会被 bash 替换为匹配文本，须用 \& 转义为字面量
+          s="${s//&/\&amp;}"
+          s="${s//</\&lt;}"
+          s="${s//>/\&gt;}"
+          s="${s//\"/\&quot;}"
+          s="${s//\'/\&apos;}"
+          printf '%s' "$s"
+        }
+        # 错误日志脱敏：勿回显原始 entry/id（防泄露 / workflow command 注入）
+        safe_log() {
+          local s="$1"
+          s="$(printf '%s' "$s" | tr -d '\000-\037')"
+          s="${s//'%'/%25}"
+          s="${s//$'\r'/%0D}"
+          s="${s//$'\n'/%0A}"
+          printf '%s' "${s:0:64}"
+        }
+        if [ -f "$HOME/.m2/settings.xml" ]; then
+          if [ "${OVERWRITE}" != "true" ]; then
+            echo "::error::~/.m2/settings.xml already exists and overwrite=false; refusing to clobber existing servers/mirrors/profiles" >&2
+            exit 1
+          fi
+          # overwrite=true：自托管 runner 上一步/job 残留属正常，静默替换（job 结束仍会 rm）
+          rm -f "$HOME/.m2/settings.xml.bak"
+        fi
+
+        {
+          echo '<?xml version="1.0" encoding="UTF-8"?>'
+          echo '<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"'
+          echo '  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"'
+          echo '  xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">'
+          echo '  <servers>'
+          IFS=',' read -ra REPOS <<< "${PACKAGE_REPOS:-}"
+          # 可移植去重（兼容 macOS bash 3.2；勿用 declare -A）
+          SEEN_IDS=()
+          server_count=0
+          entry_index=0
+          for entry in "${REPOS[@]+"${REPOS[@]}"}"; do
+            entry_index=$((entry_index + 1))
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [ -z "$entry" ] && continue
+            if [[ "$entry" == *:* ]]; then
+              repo="${entry%%:*}"
+              id="${entry#*:}"
+              # repo 前缀仅作调用方标注；鉴权只依赖 server id 与 pom 对齐
+              if [ -z "$repo" ] || [ -z "$id" ] || [[ "$id" == *:* ]]; then
+                echo "::error::invalid package_repos entry #${entry_index} (expected repo or repo:serverId)" >&2
+                exit 1
+              fi
+            else
+              id="github-${entry}"
+            fi
+            if [[ ! "$id" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "::error::invalid Maven server id at package_repos entry #${entry_index} (allowed [A-Za-z0-9._-]+, preview=$(safe_log "$id"))" >&2
+              exit 1
+            fi
+            for used in "${SEEN_IDS[@]+"${SEEN_IDS[@]}"}"; do
+              if [ "$used" = "$id" ]; then
+                echo "::error::duplicate Maven server id at package_repos entry #${entry_index}" >&2
+                exit 1
+              fi
+            done
+            SEEN_IDS+=("$id")
+            echo "    <server>"
+            echo "      <id>$(xml_escape "$id")</id>"
+            echo "      <username>$(xml_escape "$MAVEN_USER")</username>"
+            echo "      <password>$(xml_escape "$MAVEN_PASSWORD")</password>"
+            echo "    </server>"
+            server_count=$((server_count + 1))
+          done
+          if [ "$server_count" -eq 0 ]; then
+            echo "::error::package_repos produced zero servers (empty or whitespace-only)" >&2
+            exit 1
+          fi
+          echo '  </servers>'
+          echo '</settings>'
+        } > "$HOME/.m2/settings.xml.new"
+        mv -f "$HOME/.m2/settings.xml.new" "$HOME/.m2/settings.xml"
+        chmod 600 "$HOME/.m2/settings.xml"
+        if [ -n "${OWNER:-}" ]; then
+          echo "Maven settings.xml configured for owner=$(safe_log "$OWNER") (log only), server_count=${server_count}"
+        else
+          echo "Maven settings.xml configured, server_count=${server_count}"
+        fi
+        echo "Reminder: rm -f ~/.m2/settings.xml after maven steps (especially on self-hosted runners)."

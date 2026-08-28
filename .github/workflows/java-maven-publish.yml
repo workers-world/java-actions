@@ -1,0 +1,119 @@
+name: Java Maven publish
+
+# SDK 仓 push dev_* 时 deploy 到 GitHub Packages。
+# pom.xml 须有 distributionManagement，server <id> 与 server_id 一致。
+#
+# 安全约束（强制）：
+# - **仅允许** 受信 push（dev_*）或已验证的 release 流程调用；**禁止** 挂到 pull_request / pull_request_target。
+# - workflow_call 下 github.event_name 恒为 workflow_call，本文件无法感知调用方事件；调用方必须自行保证。
+# - 推荐经 java-maven-sdk-ci（先 verify 再 publish）调用，勿直接把本 workflow 接到 PR。
+#
+# Caller 典型用法：
+#   permissions: { contents: read, packages: write }
+#   uses: workers-world/java-actions/.github/workflows/java-maven-publish.yml@actions/v0.5.0
+#   secrets: inherit
+#   with:
+#     github_packages_repo: framework-sdk
+#     server_id: github-framework-sdk
+#
+# 默认 -DskipTests：假定 caller 已先跑 verify（如 java-maven-sdk-ci）；直接复用本 workflow 时请确认测试已通过。
+# settings.xml 只由 configure-maven-github-packages 写入；setup-java 勿带 server-*，避免覆盖多仓 server。
+# maven 步骤后建议 rm -f ~/.m2/settings.xml（尤其自托管 runner）。
+on:
+  workflow_call:
+    inputs:
+      github_packages_owner:
+        description: Packages owner（仅日志；默认 workers-world；settings 鉴权靠 server id）
+        type: string
+        default: "workers-world"
+      github_packages_repo:
+        description: 本仓 GitHub 仓库名（发布目标）
+        type: string
+        required: true
+      server_id:
+        description: 与 pom distributionManagement <id> 一致
+        type: string
+        required: true
+      java_version:
+        type: string
+        default: "17"
+      maven_deploy_args:
+        description: deploy 附加参数（经 env 传入并白名单校验；仅允许 -Dkey=value 形式，空格分隔）。默认 -DskipTests（caller 须先 verify；禁止 PR 事件直接调用本 workflow）
+        type: string
+        default: "-DskipTests"
+      github_packages_repos_for_auth:
+        description: 鉴权用仓库列表（repo 或 repo:serverId），默认仅本仓
+        type: string
+        default: ""
+    secrets:
+      GITHUB_PACKAGES_TOKEN:
+        required: false
+      WORKERS_WORLD_GHA_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  # 含 repository，避免不同仓同名分支的 publish 互斥排队
+  group: publish-${{ github.repository }}-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # 与 verify 一致用 ubuntu-latest；发版可复现性优先依赖 JDK/Maven 版本而非 OS 镜像 pin
+    runs-on: ${{ vars.WORKERS_WORLD_GHA_RUNNER != '' && vars.WORKERS_WORLD_GHA_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v6
+        with:
+          java-version: ${{ inputs.java_version }}
+          distribution: temurin
+          cache: maven
+
+      - name: Ensure Maven CLI
+        uses: workers-world/java-actions/.github/actions/ensure-maven@actions/v0.5.0
+
+      - name: Remove stale Maven settings.xml
+        run: rm -f "$HOME/.m2/settings.xml" "$HOME/.m2/settings.xml.bak"
+
+      # 在 setup-java 之后写入，避免被其覆盖；勿在 setup-java 填 server-*
+      # Pin 与 bundle 同版本 tag；tag 勿 force-move
+      - name: Configure Maven GitHub Packages auth
+        uses: workers-world/java-actions/.github/actions/java/configure-maven-github-packages@actions/v0.5.0
+        with:
+          owner: ${{ inputs.github_packages_owner }}
+          package_repos: ${{ inputs.github_packages_repos_for_auth != '' && inputs.github_packages_repos_for_auth || format('{0}:{1}', inputs.github_packages_repo, inputs.server_id) }}
+          server_username: ${{ github.actor }}
+          server_password: ${{ secrets.GITHUB_PACKAGES_TOKEN || secrets.WORKERS_WORLD_GHA_TOKEN || github.token }}
+
+      - name: Maven deploy
+        env:
+          MAVEN_DEPLOY_ARGS: ${{ inputs.maven_deploy_args }}
+        run: |
+          set -euo pipefail
+          # 经 env 传入，避免 GHA 表达式直接拼进 shell；正则校验仅允许 -Dkey 或 -Dkey=value（value 限定字符集，防 ;evil 等注入）
+          read -r -a args <<< "${MAVEN_DEPLOY_ARGS:-}"
+          for a in "${args[@]}"; do
+            if [[ ! "$a" =~ ^-D[A-Za-z0-9._]+(=[A-Za-z0-9._:/+@-]*)?$ ]]; then
+              safe="${a//'%'/%25}"
+              safe="${safe//$'\r'/%0D}"
+              safe="${safe//$'\n'/%0A}"
+              echo "::error::maven_deploy_args contains disallowed token: ${safe} (allowed: -Dkey or -Dkey=value with limited charset)"
+              exit 1
+            fi
+          done
+          mvn -B deploy "${args[@]}"
+
+      - name: Cleanup Maven settings.xml
+        if: always()
+        run: rm -f "$HOME/.m2/settings.xml"

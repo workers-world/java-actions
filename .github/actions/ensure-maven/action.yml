@@ -1,0 +1,60 @@
+name: Ensure Maven CLI
+description: 若 PATH 无 mvn，则下载 Apache Maven 到 RUNNER_TEMP（self-hosted / 精简镜像兼容）
+
+inputs:
+  maven_version:
+    description: Apache Maven 版本
+    required: false
+    default: "3.9.9"
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        MAVEN_VERSION: ${{ inputs.maven_version }}
+      run: |
+        set -euo pipefail
+
+        install_dir="${RUNNER_TEMP}/apache-maven-${MAVEN_VERSION}"
+        mvn_bin="${install_dir}/bin/mvn"
+
+        if command -v mvn >/dev/null 2>&1; then
+          mvn -version
+          exit 0
+        fi
+
+        if [ ! -x "${mvn_bin}" ]; then
+          tarball="apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+          tmp_tar="${RUNNER_TEMP}/${tarball}"
+          urls=(
+            "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/${MAVEN_VERSION}/${tarball}"
+            "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/${tarball}"
+          )
+          downloaded=0
+          for url in "${urls[@]}"; do
+            rm -f "${tmp_tar}"
+            if curl -fsSL -o "${tmp_tar}" "${url}" && tar xzf "${tmp_tar}" -C "${RUNNER_TEMP}"; then
+              downloaded=1
+              rm -f "${tmp_tar}"
+              break
+            fi
+            echo "::warning::Maven download failed: ${url}"
+            rm -f "${tmp_tar}"
+          done
+          if [ "${downloaded}" -ne 1 ]; then
+            echo "::error::Could not download Maven ${MAVEN_VERSION} from Maven Central or Apache archive"
+            exit 1
+          fi
+        fi
+
+        if [ ! -x "${mvn_bin}" ]; then
+          echo "::error::Maven binary missing after install: ${mvn_bin}"
+          ls -la "${install_dir}/bin" 2>/dev/null || ls -la "${RUNNER_TEMP}" || true
+          exit 1
+        fi
+
+        # GITHUB_PATH 仅对后续 step 生效；本 step 内须用绝对路径或 export PATH
+        echo "${install_dir}/bin" >> "$GITHUB_PATH"
+        export PATH="${install_dir}/bin:${PATH}"
+        "${mvn_bin}" -version

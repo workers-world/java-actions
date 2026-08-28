@@ -1,0 +1,125 @@
+name: Java Maven SDK CI
+
+# workers-world SDK 仓统一 CI：verify + push dev_* 时 publish。
+#
+# Caller 典型用法（见 templates/java/sdk-ci.yml）：
+#   uses: workers-world/java-actions/.github/workflows/java-maven-sdk-ci.yml@actions/v0.5.0
+#   permissions: { contents: read, packages: write }
+#   secrets:
+#     GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
+#     WORKERS_WORLD_GHA_TOKEN: ${{ secrets.WORKERS_WORLD_GHA_TOKEN }}
+#   with:
+#     github_packages_repo: db-init-flyway-spring-boot-starter
+#     server_id: github-db-init-flyway
+#     concurrency_group: ${{ format('sdk-ci-{0}-{1}', github.repository, github.ref_name) }}
+#     publish_on_push: ${{ github.event_name == 'push' && startsWith(github.ref_name, 'dev_') && github.ref_type == 'branch' }}
+# 注意：reusable 内 github.event_name 恒为 workflow_call；publish 仅看 inputs.publish_on_push（勿再依赖 github.ref_*）。
+# 勿对 nested verify/publish 使用 secrets: inherit；只透传上列 Packages token。
+# concurrency 仅在本 reusable 声明；caller 勿再设顶层 concurrency（同名 group 会与 workflow_call 死锁）。
+# concurrency_group 强烈建议 caller 显式传入唯一值（默认值在多 caller 同 ref 时会互斥，可能误取消在途 publish）。
+on:
+  workflow_call:
+    inputs:
+      github_packages_repo:
+        description: 本仓 GitHub 仓库名
+        type: string
+        required: true
+      server_id:
+        description: pom distributionManagement server id
+        type: string
+        required: true
+      github_packages_owner:
+        # 仅日志展示，与鉴权无关；其他组织复用时须显式传入，避免误导性默认 org 名
+        description: Packages owner（仅日志；settings 鉴权靠 server id，与本值无关；其他组织须显式传入）
+        type: string
+        default: "workers-world"
+      github_packages_repos_for_verify:
+        description: verify 阶段需拉取的依赖包（repo 或 repo:serverId，逗号分隔）；无则留空
+        type: string
+        default: ""
+      maven_goals:
+        type: string
+        default: "verify"
+      maven_deploy_args:
+        type: string
+        default: "-DskipTests"
+      java_version:
+        type: string
+        default: "17"
+      publish_on_push:
+        description: 由 caller 判定是否应 publish（含 push + dev_* 分支等）；reusable 内勿再读 github.ref_*
+        type: boolean
+        default: false
+      concurrency_group:
+        description: 可选；caller 传入时覆盖默认 concurrency group（多 caller 同 ref 须显式传唯一值，如含 github.workflow）
+        type: string
+        default: ""
+    secrets:
+      GITHUB_PACKAGES_TOKEN:
+        required: false
+      WORKERS_WORLD_GHA_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # fallback 用分支维度（head_ref/ref_name），勿用 github.sha（否则 cancel-in-progress 失效）
+  # 注意：workflow_call 内 github.workflow 为本 reusable 名；多 caller 同 ref 会互斥，caller 须传唯一 concurrency_group
+  group: ${{ inputs.concurrency_group != '' && inputs.concurrency_group || format('sdk-ci-{0}-{1}-{2}', github.repository, github.workflow, github.head_ref || github.ref_name || github.ref || 'default') }}
+  cancel-in-progress: true
+
+jobs:
+  # timeout 须设在 nested runnable job 上（caller 的 uses: 不支持 timeout-minutes）
+  # 勿 secrets: inherit——只透传本工作流声明的 Packages token，避免把调用方其它 secret 下传
+  verify:
+    permissions:
+      contents: read
+      packages: read
+    uses: workers-world/java-actions/.github/workflows/java-maven-verify.yml@actions/v0.5.0
+    secrets:
+      GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
+      WORKERS_WORLD_GHA_TOKEN: ${{ secrets.WORKERS_WORLD_GHA_TOKEN }}
+    with:
+      java_version: ${{ inputs.java_version }}
+      maven_goals: ${{ inputs.maven_goals }}
+      github_packages_owner: ${{ inputs.github_packages_owner }}
+      github_packages_repos: ${{ inputs.github_packages_repos_for_verify }}
+
+  # publish 前快速失败：token 缺失时勿一路跑到 Maven 403
+  publish-guard:
+    needs: verify
+    if: ${{ inputs.publish_on_push }}
+    runs-on: ${{ vars.WORKERS_WORLD_GHA_RUNNER != '' && vars.WORKERS_WORLD_GHA_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Require packages token for publish
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
+          WORKERS_WORLD_GHA_TOKEN: ${{ secrets.WORKERS_WORLD_GHA_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GITHUB_PACKAGES_TOKEN:-}" ] && [ -z "${WORKERS_WORLD_GHA_TOKEN:-}" ]; then
+            echo "::error::publish_on_push=true 但未提供 GITHUB_PACKAGES_TOKEN 或 WORKERS_WORLD_GHA_TOKEN"
+            exit 1
+          fi
+
+  publish:
+    needs: [verify, publish-guard]
+    # boolean input 无需 fromJSON（fromJSON 期望 string）
+    if: ${{ inputs.publish_on_push }}
+    permissions:
+      contents: read
+      packages: write
+    uses: workers-world/java-actions/.github/workflows/java-maven-publish.yml@actions/v0.5.0
+    secrets:
+      GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
+      WORKERS_WORLD_GHA_TOKEN: ${{ secrets.WORKERS_WORLD_GHA_TOKEN }}
+    with:
+      github_packages_owner: ${{ inputs.github_packages_owner }}
+      github_packages_repo: ${{ inputs.github_packages_repo }}
+      server_id: ${{ inputs.server_id }}
+      java_version: ${{ inputs.java_version }}
+      maven_deploy_args: ${{ inputs.maven_deploy_args }}
+      github_packages_repos_for_auth: ${{ format('{0}:{1}', inputs.github_packages_repo, inputs.server_id) }}

@@ -1,0 +1,260 @@
+name: Java Maven verify
+
+# Java 业务仓 verify：从 GitHub Packages 解析 workers-world SDK，不再 git clone SDK 源码。
+#
+# Caller 典型用法：
+#   permissions: { contents: read, packages: read }
+#   uses: workers-world/java-actions/.github/workflows/java-maven-verify.yml@actions/v0.5.0
+#   secrets: inherit
+#   with:
+#     github_packages_repos: framework-sdk,framework-sdk-llm,db-init-flyway-spring-boot-starter
+#     enable_mysql: true
+#
+# 鉴权（403 时按序检查）：
+# 1. Org Secret GITHUB_PACKAGES_TOKEN 或 WORKERS_WORLD_GHA_TOKEN（classic PAT，read:packages）
+# 2. PAT 所属账号对 SDK 源码仓库有 Read（Maven 无 npm 式 Manage Actions access；见 docs/java/maven-github-packages.md）
+# 3. caller permissions.packages: read
+# 4. pom.xml <repositories><url> 为 https://maven.pkg.github.com/workers-world/<repo>
+#
+# pom.xml 须声明对应 <repositories>（见 templates/java/maven-repositories-pom.xml.snippet）
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Checkout ref override（tag/branch），空则用 caller ref
+        type: string
+        default: ""
+      java_version:
+        description: JDK 版本
+        type: string
+        default: "17"
+      maven_goals:
+        description: Maven 目标（不含 mvn 前缀）；仅允许白名单词，空格分隔，如 test / verify / clean verify / package
+        type: string
+        default: "test"
+      github_packages_owner:
+        description: Packages owner（仅日志；默认 workers-world；settings 鉴权靠 server id）
+        type: string
+        default: "workers-world"
+      github_packages_repos:
+        description: 逗号分隔依赖包所在仓库名
+        type: string
+        default: ""
+      enable_mysql:
+        description: 启动 MySQL 8 服务（集成测试）
+        type: boolean
+        default: false
+      mysql_database:
+        description: MySQL 库名
+        type: string
+        default: "reconciliation"
+      upload_jacoco:
+        description: 上传 target/site/jacoco 为 artifact
+        type: boolean
+        default: false
+      upload_release_artifacts:
+        description: package + 生成 SBOM（发版 verify 用）
+        type: boolean
+        default: false
+      release_jar_path:
+        description: 可选；显式指定 SBOM 用 jar（相对仓库根，如 module/target/app.jar）；空则用根模块 finalName
+        type: string
+        default: ""
+    secrets:
+      GITHUB_PACKAGES_TOKEN:
+        description: read:packages PAT；未传则尝试 WORKERS_WORLD_GHA_TOKEN / GITHUB_TOKEN
+        required: false
+      WORKERS_WORLD_GHA_TOKEN:
+        description: 兼容 workers-world Org PAT
+        required: false
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: java-maven-verify-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ${{ vars.WORKERS_WORLD_GHA_RUNNER != '' && vars.WORKERS_WORLD_GHA_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
+          # verify / package / SBOM 不依赖完整历史；浅克隆即可
+          fetch-depth: 1
+
+      - name: Set up JDK
+        uses: actions/setup-java@v6
+        with:
+          java-version: ${{ inputs.java_version }}
+          distribution: temurin
+          cache: maven
+
+      - name: Ensure Maven CLI
+        uses: workers-world/java-actions/.github/actions/ensure-maven@actions/v0.5.0
+
+      - name: Remove stale Maven settings.xml
+        if: ${{ inputs.github_packages_repos != '' }}
+        run: rm -f "$HOME/.m2/settings.xml" "$HOME/.m2/settings.xml.bak"
+
+      - name: Configure Maven GitHub Packages auth
+        if: ${{ inputs.github_packages_repos != '' }}
+        # Pin 与 bundle 同版本 tag
+        uses: workers-world/java-actions/.github/actions/java/configure-maven-github-packages@actions/v0.5.0
+        with:
+          owner: ${{ inputs.github_packages_owner }}
+          package_repos: ${{ inputs.github_packages_repos }}
+          server_username: ${{ github.actor }}
+          server_password: ${{ secrets.GITHUB_PACKAGES_TOKEN || secrets.WORKERS_WORLD_GHA_TOKEN || github.token }}
+
+      - name: Start MySQL
+        if: ${{ inputs.enable_mysql }}
+        env:
+          MYSQL_DATABASE: ${{ inputs.mysql_database }}
+        run: |
+          set -euo pipefail
+          docker rm -f ci-mysql >/dev/null 2>&1 || true
+          MYSQL_ROOT_PASSWORD="$(openssl rand -hex 16)"
+          echo "::add-mask::${MYSQL_ROOT_PASSWORD}"
+          echo "DB_PASSWORD=${MYSQL_ROOT_PASSWORD}" >> "$GITHUB_ENV"
+          echo "DB_HOST=127.0.0.1" >> "$GITHUB_ENV"
+          echo "DB_USERNAME=root" >> "$GITHUB_ENV"
+          docker run -d --name ci-mysql \
+            -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
+            -e MYSQL_DATABASE="$MYSQL_DATABASE" \
+            -p 3306:3306 \
+            mysql:8.0.36
+          for i in $(seq 1 30); do
+            if docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" ci-mysql mysql -h 127.0.0.1 -uroot -e "SELECT 1" >/dev/null 2>&1; then
+              echo "MySQL is ready (auth ok)"
+              exit 0
+            fi
+            echo "Waiting for MySQL... ($i/30)"
+            sleep 2
+          done
+          echo "MySQL did not become ready in time"
+          exit 1
+
+      - name: Run Maven goals
+        env:
+          MAVEN_GOALS: ${{ inputs.maven_goals }}
+          ENABLE_MYSQL: ${{ inputs.enable_mysql }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # DB_* 仅由 Start MySQL 写入 GITHUB_ENV；未启用时显式清除，避免继承/误连
+          if [ "${ENABLE_MYSQL}" != "true" ]; then
+            unset DB_HOST DB_USERNAME DB_PASSWORD || true
+          fi
+          # 经 env 传入，避免 GHA 表达式直接拼进 shell；再白名单校验防注入
+          read -ra goals <<< "${MAVEN_GOALS}"
+          if [ "${#goals[@]}" -eq 0 ]; then
+            echo "::error::maven_goals is empty"
+            exit 1
+          fi
+          for g in "${goals[@]}"; do
+            case "$g" in
+              clean|test|verify|package|install|compile|check|validate) ;;
+              *)
+                echo "::error::maven_goals contains disallowed token: ${g} (allowed: clean test verify package install compile check validate)"
+                exit 1
+                ;;
+            esac
+          done
+          mvn -B -q "${goals[@]}"
+
+      - name: Upload JaCoCo report
+        if: ${{ inputs.upload_jacoco && success() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+          if-no-files-found: ignore
+
+      - name: Package for supply chain attestations
+        # 仅当 maven_goals 未含打包目标（package/verify/install）时才补打包，避免重复构建
+        if: ${{ inputs.upload_release_artifacts && success() && !contains(inputs.maven_goals, 'package') && !contains(inputs.maven_goals, 'verify') && !contains(inputs.maven_goals, 'install') }}
+        run: mvn -B -q package -DskipTests -Dspring-boot.skip=false
+
+      - name: Resolve package jar
+        if: ${{ inputs.upload_release_artifacts && success() }}
+        id: jar
+        env:
+          RELEASE_JAR_PATH: ${{ inputs.release_jar_path }}
+        run: |
+          set -euo pipefail
+          if [ -n "${RELEASE_JAR_PATH:-}" ]; then
+            JAR="${RELEASE_JAR_PATH}"
+            if [ ! -f "$JAR" ]; then
+              echo "::error::release_jar_path not found: ${JAR}"
+              exit 1
+            fi
+            echo "path=${JAR}" >> "$GITHUB_OUTPUT"
+            echo "Using jar (explicit): ${JAR}"
+            exit 0
+          fi
+          # 单模块：用 project.build.finalName；多模块请传 release_jar_path
+          set +e
+          FINAL_NAME="$(mvn -B -q -DforceStdout help:evaluate -Dexpression=project.build.finalName 2>/dev/null)"
+          mvn_rc=$?
+          set -e
+          FINAL_NAME="$(printf '%s' "$FINAL_NAME" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [ "${mvn_rc}" -ne 0 ] || [ -z "$FINAL_NAME" ] || [[ "$FINAL_NAME" == null ]]; then
+            echo "::warning::project.build.finalName 解析失败，尝试 find target/*.jar 兜底"
+            mapfile -t CANDIDATES < <(find . -path '*/target/*.jar' -type f ! -name '*-sources.jar' ! -name '*-javadoc.jar' ! -name '*-tests.jar' | sort || true)
+            if [ "${#CANDIDATES[@]}" -eq 0 ]; then
+              echo "::error::Could not resolve jar (finalName failed and no target/*.jar found). Set release_jar_path for multi-module."
+              find . -path '*/target/*.jar' -type f | head -20 || true
+              exit 1
+            fi
+            if [ "${#CANDIDATES[@]}" -gt 1 ]; then
+              echo "::error::Found ${#CANDIDATES[@]} candidate jars; set release_jar_path explicitly for multi-module (refusing silent pick)."
+              printf '%s\n' "${CANDIDATES[@]}" | head -20
+              exit 1
+            fi
+            JAR="${CANDIDATES[0]}"
+            echo "path=${JAR}" >> "$GITHUB_OUTPUT"
+            echo "Using jar (find fallback, single candidate): ${JAR}"
+            exit 0
+          fi
+          JAR="target/${FINAL_NAME}.jar"
+          if [ ! -f "$JAR" ]; then
+            echo "::error::Expected jar not found: ${JAR}"
+            echo "Hint: set release_jar_path for multi-module, or ensure package wrote target/\${project.artifactId}-\${project.version}.jar"
+            ls -la target/ || true
+            find . -path '*/target/*.jar' -type f | head -20 || true
+            exit 1
+          fi
+          echo "path=${JAR}" >> "$GITHUB_OUTPUT"
+          echo "Using jar: ${JAR}"
+
+      - name: Generate SBOM
+        if: ${{ inputs.upload_release_artifacts && success() }}
+        # Pin full commit (tag v0.20.9 → 8e94d75…；核验：git ls-remote + release notes Syft v1.36.0 #546)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          # path=待扫描目标（jar），file=SBOM 输出文件名；output-file 非有效输入会被忽略
+          path: ${{ steps.jar.outputs.path }}
+          file: sbom.spdx.json
+          upload-release-assets: false
+          upload-artifact: false
+
+      - name: Upload SBOM artifact
+        if: ${{ inputs.upload_release_artifacts && success() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-sbom
+          path: sbom.spdx.json
+          if-no-files-found: error
+
+      - name: Cleanup Maven settings.xml
+        if: always()
+        run: rm -f "$HOME/.m2/settings.xml"
