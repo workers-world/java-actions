@@ -1,0 +1,19 @@
+name: Create GitHub Release
+
+# actions/v* tag push → GitHub Release 页面（leaf 在 worker-actions，避免重复实现）。
+# 合入含 create-gh-release 的 bundle 后，将 pin 升到对应 @actions/vX.Y.Z。
+# 见 workers-world/worker-actions docs/gh-release.md
+on:
+  push:
+    tags:
+      - "actions/v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: workers-world/worker-actions/.github/workflows/create-gh-release.yml@actions/v0.1.0
+    secrets: inherit
+    with:
+      tag_name: ${{ github.ref_name }}
