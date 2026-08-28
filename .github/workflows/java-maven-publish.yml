@@ -48,7 +48,7 @@ on:
     secrets:
       GITHUB_PACKAGES_TOKEN:
         required: false
-      WORKERS_WORLD_GHA_TOKEN:
+      GHA_TOKEN:
         required: false
 
 permissions:
@@ -63,7 +63,7 @@ concurrency:
 jobs:
   publish:
     # 与 verify 一致用 ubuntu-latest；发版可复现性优先依赖 JDK/Maven 版本而非 OS 镜像 pin
-    runs-on: ${{ vars.WORKERS_WORLD_GHA_RUNNER != '' && vars.WORKERS_WORLD_GHA_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (vars.GHA_RUNNER != '' && vars.GHA_RUNNER || vars.WORKERS_WORLD_GHA_RUNNER != '' && vars.WORKERS_WORLD_GHA_RUNNER || 'ubuntu-latest') }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -94,7 +94,7 @@ jobs:
           owner: ${{ inputs.github_packages_owner }}
           package_repos: ${{ inputs.github_packages_repos_for_auth != '' && inputs.github_packages_repos_for_auth || format('{0}:{1}', inputs.github_packages_repo, inputs.server_id) }}
           server_username: ${{ github.actor }}
-          server_password: ${{ secrets.GITHUB_PACKAGES_TOKEN || secrets.WORKERS_WORLD_GHA_TOKEN || github.token }}
+          server_password: ${{ secrets.GITHUB_PACKAGES_TOKEN || secrets.GHA_TOKEN || secrets.WORKERS_WORLD_GHA_TOKEN || github.token }}
 
       - name: Maven deploy
         env:

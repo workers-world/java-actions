@@ -11,7 +11,7 @@ name: Java Maven verify
 #     enable_mysql: true
 #
 # 鉴权（403 时按序检查）：
-# 1. Org Secret GITHUB_PACKAGES_TOKEN 或 WORKERS_WORLD_GHA_TOKEN（classic PAT，read:packages）
+# 1. Org Secret GITHUB_PACKAGES_TOKEN 或 GHA_TOKEN（classic PAT，read:packages）
 # 2. PAT 所属账号对 SDK 源码仓库有 Read（Maven 无 npm 式 Manage Actions access；见 docs/java/maven-github-packages.md）
 # 3. caller permissions.packages: read
 # 4. pom.xml <repositories><url> 为 https://maven.pkg.github.com/workers-world/<repo>
@@ -62,9 +62,9 @@ on:
         default: ""
     secrets:
       GITHUB_PACKAGES_TOKEN:
-        description: read:packages PAT；未传则尝试 WORKERS_WORLD_GHA_TOKEN / GITHUB_TOKEN
+        description: read:packages PAT；未传则尝试 GHA_TOKEN / GITHUB_TOKEN
         required: false
-      WORKERS_WORLD_GHA_TOKEN:
+      GHA_TOKEN:
         description: 兼容 workers-world Org PAT
         required: false
 
@@ -78,7 +78,7 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ${{ vars.WORKERS_WORLD_GHA_RUNNER != '' && vars.WORKERS_WORLD_GHA_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (vars.GHA_RUNNER != '' && vars.GHA_RUNNER || vars.WORKERS_WORLD_GHA_RUNNER != '' && vars.WORKERS_WORLD_GHA_RUNNER || 'ubuntu-latest') }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -113,7 +113,7 @@ jobs:
           owner: ${{ inputs.github_packages_owner }}
           package_repos: ${{ inputs.github_packages_repos }}
           server_username: ${{ github.actor }}
-          server_password: ${{ secrets.GITHUB_PACKAGES_TOKEN || secrets.WORKERS_WORLD_GHA_TOKEN || github.token }}
+          server_password: ${{ secrets.GITHUB_PACKAGES_TOKEN || secrets.GHA_TOKEN || secrets.WORKERS_WORLD_GHA_TOKEN || github.token }}
 
       - name: Start MySQL
         if: ${{ inputs.enable_mysql }}

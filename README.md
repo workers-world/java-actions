@@ -47,8 +47,8 @@ jobs:
 
 | 名称 | 类型 | 用途 |
 |------|------|------|
-| `GITHUB_PACKAGES_TOKEN` 或 `WORKERS_WORLD_GHA_TOKEN` | Secret | classic PAT：`read:packages` / `write:packages` |
-| `WORKERS_WORLD_GHA_RUNNER` | Variable | 空则 `ubuntu-latest`；在 **caller** 上下文求值 |
+| `GITHUB_PACKAGES_TOKEN` 或 `GHA_TOKEN`（兼容旧名 `WORKERS_WORLD_GHA_TOKEN`） | Secret | classic PAT：`read:packages` / `write:packages` |
+| `GHA_RUNNER`（兼容旧名 `WORKERS_WORLD_GHA_RUNNER`） | Variable | 空则 `ubuntu-latest`；在 **caller** 上下文求值 |
 
 `java-maven-publish` **禁止**挂到 `pull_request` / `pull_request_target`。
 

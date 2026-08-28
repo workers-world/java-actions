@@ -7,7 +7,7 @@ name: Java Maven SDK CI
 #   permissions: { contents: read, packages: write }
 #   secrets:
 #     GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
-#     WORKERS_WORLD_GHA_TOKEN: ${{ secrets.WORKERS_WORLD_GHA_TOKEN }}
+#     GHA_TOKEN: ${{ secrets.GHA_TOKEN || secrets.WORKERS_WORLD_GHA_TOKEN }}
 #   with:
 #     github_packages_repo: db-init-flyway-spring-boot-starter
 #     server_id: github-db-init-flyway
@@ -57,7 +57,7 @@ on:
     secrets:
       GITHUB_PACKAGES_TOKEN:
         required: false
-      WORKERS_WORLD_GHA_TOKEN:
+      GHA_TOKEN:
         required: false
 
 permissions:
@@ -79,7 +79,7 @@ jobs:
     uses: workers-world/java-actions/.github/workflows/java-maven-verify.yml@actions/v0.5.0
     secrets:
       GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
-      WORKERS_WORLD_GHA_TOKEN: ${{ secrets.WORKERS_WORLD_GHA_TOKEN }}
+      GHA_TOKEN: ${{ secrets.GHA_TOKEN || secrets.WORKERS_WORLD_GHA_TOKEN }}
     with:
       java_version: ${{ inputs.java_version }}
       maven_goals: ${{ inputs.maven_goals }}
@@ -90,18 +90,18 @@ jobs:
   publish-guard:
     needs: verify
     if: ${{ inputs.publish_on_push }}
-    runs-on: ${{ vars.WORKERS_WORLD_GHA_RUNNER != '' && vars.WORKERS_WORLD_GHA_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (vars.GHA_RUNNER != '' && vars.GHA_RUNNER || vars.WORKERS_WORLD_GHA_RUNNER != '' && vars.WORKERS_WORLD_GHA_RUNNER || 'ubuntu-latest') }}
     timeout-minutes: 2
     permissions: {}
     steps:
       - name: Require packages token for publish
         env:
           GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
-          WORKERS_WORLD_GHA_TOKEN: ${{ secrets.WORKERS_WORLD_GHA_TOKEN }}
+          GHA_TOKEN: ${{ secrets.GHA_TOKEN || secrets.WORKERS_WORLD_GHA_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${GITHUB_PACKAGES_TOKEN:-}" ] && [ -z "${WORKERS_WORLD_GHA_TOKEN:-}" ]; then
-            echo "::error::publish_on_push=true 但未提供 GITHUB_PACKAGES_TOKEN 或 WORKERS_WORLD_GHA_TOKEN"
+          if [ -z "${GITHUB_PACKAGES_TOKEN:-}" ] && [ -z "${GHA_TOKEN:-}" ]; then
+            echo "::error::publish_on_push=true 但未提供 GITHUB_PACKAGES_TOKEN 或 GHA_TOKEN"
             exit 1
           fi
 
@@ -115,7 +115,7 @@ jobs:
     uses: workers-world/java-actions/.github/workflows/java-maven-publish.yml@actions/v0.5.0
     secrets:
       GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
-      WORKERS_WORLD_GHA_TOKEN: ${{ secrets.WORKERS_WORLD_GHA_TOKEN }}
+      GHA_TOKEN: ${{ secrets.GHA_TOKEN || secrets.WORKERS_WORLD_GHA_TOKEN }}
     with:
       github_packages_owner: ${{ inputs.github_packages_owner }}
       github_packages_repo: ${{ inputs.github_packages_repo }}
