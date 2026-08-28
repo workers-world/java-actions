@@ -33,7 +33,7 @@ Release PR（qodana / OCR / auto-merge）仍用 [workers-world/worker-actions](h
 
 | Secret / 权限 | 说明 |
 |---------------|------|
-| `GITHUB_PACKAGES_TOKEN` 或 `GHA_TOKEN`（兼容旧名 `WORKERS_WORLD_GHA_TOKEN`） | classic PAT：消费 `read:packages` / 发布 `write:packages` |
+| `GITHUB_PACKAGES_TOKEN` 或 `GHA_TOKEN` | classic PAT：消费 `read:packages` / 发布 `write:packages` |
 | SDK 源码仓库 Read | Maven 包权限继承该仓库 |
 | caller `permissions.packages` | verify：`read`；publish：`write` |
 

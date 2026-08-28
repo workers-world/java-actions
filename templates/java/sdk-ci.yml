@@ -20,7 +20,7 @@ jobs:
     uses: workers-world/java-actions/.github/workflows/java-maven-sdk-ci.yml@actions/v0.5.0
     secrets:
       GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
-      GHA_TOKEN: ${{ secrets.GHA_TOKEN || secrets.WORKERS_WORLD_GHA_TOKEN }}
+      GHA_TOKEN: ${{ secrets.GHA_TOKEN }}
     with:
       # 本仓仓库名与 pom distributionManagement <id>
       github_packages_repo: db-init-flyway-spring-boot-starter
