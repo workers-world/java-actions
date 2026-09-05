@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: workers-world/java-actions/.github/workflows/java-maven-verify.yml@actions/v0.1.2
+    uses: workers-world/java-actions/.github/workflows/java-maven-verify.yml@actions/v0.5.0
     secrets: inherit
     with:
       github_packages_repos: framework-sdk:github-framework-sdk,framework-sdk-llm:github-framework-sdk-llm,db-init-flyway-spring-boot-starter:github-db-init-flyway

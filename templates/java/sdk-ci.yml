@@ -1,5 +1,5 @@
 # SDK 仓 .github/workflows/ci.yml 模板
-# workers-world actions bundle: actions/v0.4.34（禁止 @master）
+# workers-world actions bundle: actions/v0.5.0（禁止 @master）
 name: CI
 
 on:

@@ -20,7 +20,7 @@ inputs:
       密码会明文写入 runner ~/.m2/settings.xml；调用方须在 maven 步骤后 rm -f ~/.m2/settings.xml（自托管 runner 尤其重要）
     required: true
   overwrite:
-    description: 已存在 settings.xml 时是否覆盖（true=覆盖并备份为 settings.xml.bak；false=直接失败）
+    description: 已存在 settings.xml 时是否覆盖（true=静默覆盖，不备份；false=直接失败）
     required: false
     default: "true"
 runs:
