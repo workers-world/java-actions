@@ -3,6 +3,9 @@ name: Release actions bundle
 # 合入 master（且变更触及可复用 workflow/action）后自动打不可变 tag actions/vX.Y.Z。
 # 也可 workflow_dispatch 指定版本。Worker 仓 pin 该 tag，勿再用 @master。
 # manifest 经 PR 回填（master 禁止直推）。见 docs/actions-releases.md
+# 鉴权：配置 RELEASE_BOT_APP_ID（Variable）+ RELEASE_BOT_PRIVATE_KEY（Secret）即自动走
+# release-bot GitHub App（短时 installation token，tag push 可触发下游 gh-release-on-tag）；
+# 未配置时回落 GHA_TOKEN/GITHUB_TOKEN（行为同迁移前）。
 on:
   push:
     branches: [master]
@@ -12,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 可选。留空则 patch+1；填写如 0.5.0 → tag actions/v0.5.0
+        description: 可选。留空则 patch+1（无 tag 时取 manifest current）；填写如 0.5.0 → tag actions/v0.5.0
         required: false
         type: string
         default: ""
@@ -36,17 +39,30 @@ jobs:
         !contains(github.event.head_commit.message, '[skip actions-release]')
       )
     steps:
+      # App 通道（可选）：配置 RELEASE_BOT_APP_ID 变量 + RELEASE_BOT_PRIVATE_KEY Secret 后自动启用；
+      # 未配置时保持 GHA_TOKEN/GITHUB_TOKEN。tag push 须由 App/PAT 发起（GITHUB_TOKEN 不触发下游 workflow）
+      - name: Mint GitHub App token
+        id: bot-token
+        if: vars.RELEASE_BOT_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          # owner/repositories 均不传 → token 仅限当前仓（v3 语义；zizmor github-app 要求）
+          permission-contents: write
+          permission-pull-requests: write
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          token: ${{ secrets.GHA_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.bot-token.outputs.token || secrets.GHA_TOKEN || secrets.GITHUB_TOKEN }}
 
       - uses: ./.github/actions/ensure-gh-cli
 
       - name: Resolve version, create tag, open manifest PR
         env:
           INPUT_VERSION: ${{ inputs.version }}
-          GH_TOKEN: ${{ secrets.GHA_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.bot-token.outputs.token || secrets.GHA_TOKEN || secrets.GITHUB_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
           REPO: ${{ github.repository }}
         run: |
@@ -64,26 +80,29 @@ jobs:
             TAG_CREATED=0
             echo "HEAD already tagged ${TAG}; sync manifest PR only"
           else
-          latest="$(git tag -l 'actions/v*' --sort=-v:refname | head -1 || true)"
-          if [ -n "${INPUT_VERSION}" ]; then
-            VERSION="${INPUT_VERSION}"
-          elif [ -n "${latest}" ]; then
-            ver="${latest#actions/v}"
-            IFS=. read -r maj min pat <<< "${ver}"
-            VERSION="${maj}.${min}.$((pat + 1))"
-            echo "Auto bump patch: ${latest} → actions/v${VERSION}"
-          else
-            if [ -f manifest/actions-bundle.yaml ]; then
-              cur="$(grep -E '^current:' manifest/actions-bundle.yaml | head -1 | awk '{print $2}' || true)"
+            latest="$(git tag -l 'actions/v*' --sort=-v:refname | head -1 || true)"
+            if [ -n "${INPUT_VERSION}" ]; then
+              VERSION="${INPUT_VERSION}"
+            elif [ -n "${latest}" ]; then
+              ver="${latest#actions/v}"
+              IFS=. read -r maj min pat <<< "${ver}"
+              VERSION="${maj}.${min}.$((pat + 1))"
+              echo "Auto bump patch: ${latest} → actions/v${VERSION}"
+            else
+              # 无任何 actions/v* tag：仅从 manifest current seed（首发布 bootstrap）；
+              # 不再兜底任意版本——无法 seed 时显式要求 workflow_dispatch 传 version
+              cur=""
+              if [ -f manifest/actions-bundle.yaml ]; then
+                cur="$(grep -E '^current:' manifest/actions-bundle.yaml | head -1 | awk '{print $2}' || true)"
+              fi
               if [[ "${cur}" =~ ^actions/v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
                 VERSION="${BASH_REMATCH[1]}"
+                echo "No existing actions/v* tag; seeding from manifest current: ${cur}"
               else
-                VERSION="0.4.0"
+                echo "::error::无 actions/v* tag 且 manifest current 无法 seed（cur=${cur:-缺失}）。首次发版请 workflow_dispatch 显式传 version（如 0.5.0）"
+                exit 1
               fi
-            else
-              VERSION="0.4.0"
             fi
-            echo "No existing actions/v* tag; using ${VERSION}"
           fi
 
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -106,7 +125,6 @@ jobs:
             git push origin "$TAG"
             TAG_CREATED=1
             echo "Created ${TAG} at ${REF}"
-          fi
           fi
 
           # master 禁止直推：开 PR 回填 manifest（tag 已是权威来源）

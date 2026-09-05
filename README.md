@@ -21,7 +21,8 @@ jobs:
     with:
       github_packages_repo: your-sdk-repo
       server_id: github-your-sdk
-      publish_on_push: ${{ github.event_name == 'push' && startsWith(github.ref_name, 'dev_') }}
+      # 含 github.ref_type == 'branch' 守卫：防止同名 dev_* tag 触发 publish
+      publish_on_push: ${{ github.event_name == 'push' && startsWith(github.ref_name, 'dev_') && github.ref_type == 'branch' }}
 ```
 
 业务仓 verify：
@@ -47,8 +48,10 @@ jobs:
 
 | 名称 | 类型 | 用途 |
 |------|------|------|
-| `GITHUB_PACKAGES_TOKEN` 或 `GHA_TOKEN` | Secret | classic PAT：`read:packages` / `write:packages` |
-| `GHA_RUNNER` | Variable | 空则 `ubuntu-latest`；在 **caller** 上下文求值 |
+| `GITHUB_PACKAGES_TOKEN` 或 `GHA_TOKEN` | Secret | classic PAT：`read:packages` / `write:packages`。**跨仓拉包必填**（缺省 fail-fast，不再静默回落 `GITHUB_TOKEN`——它拉不了跨仓 Maven Packages）；发布到**本仓** Packages 可省（走 `GITHUB_TOKEN` + `packages: write`） |
+| `GHA_RUNNER` | Variable | 空则 `ubuntu-latest`；在 **caller** 上下文求值。可被各 workflow 的 `runner` input 覆盖（fork PR 场景须显式传 `ubuntu-latest`，防 Org Variable 把 fork PR 路由到 self-hosted） |
+| `RELEASE_BOT_APP_ID` | Variable | 可选。本仓发版（release-actions-bundle）走 GitHub App 的开关：配置即自动启用 App token（与 worker-actions 同一枚 `workers-world-release-bot`），未配置回落 `GHA_TOKEN` |
+| `RELEASE_BOT_PRIVATE_KEY` | Secret | 同上，App 私钥（PEM） |
 
 `java-maven-publish` **禁止**挂到 `pull_request` / `pull_request_target`。
 
