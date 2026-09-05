@@ -1,5 +1,5 @@
 name: Ensure GitHub CLI
-description: 若 PATH 无 gh，则下载到 RUNNER_TEMP/gha-bin（self-hosted 兼容）
+description: 若 PATH 无 gh，则下载到 RUNNER_TEMP/gha-bin（self-hosted 兼容；按 RUNNER_ARCH 选架构，校验官方 checksums）
 
 inputs:
   gh_version:
@@ -21,9 +21,20 @@ runs:
         fi
         bindir="${RUNNER_TEMP}/gha-bin"
         mkdir -p "$bindir"
-        curl -fsSL \
-          "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
-          | tar xz -C "$bindir" --strip-components=2 "gh_${GH_VERSION}_linux_amd64/bin/gh"
+        # RUNNER_ARCH 约定值：X64 / ARM64
+        case "${RUNNER_ARCH:-X64}" in
+          ARM64) arch="arm64" ;;
+          *) arch="amd64" ;;
+        esac
+        asset="gh_${GH_VERSION}_linux_${arch}.tar.gz"
+        base="https://github.com/cli/cli/releases/download/v${GH_VERSION}"
+        # 官方 checksums.txt 校验（防下载产物被篡改/镜像投毒）
+        curl -fsSL --retry 3 "${base}/gh_${GH_VERSION}_checksums.txt" -o "${RUNNER_TEMP}/gh.sha256"
+        curl -fsSL --retry 3 "${base}/${asset}" -o "${RUNNER_TEMP}/gh.tgz"
+        grep " ${asset}\$" "${RUNNER_TEMP}/gh.sha256" \
+          | sed "s|${asset}|${RUNNER_TEMP}/gh.tgz|" \
+          | sha256sum -c -
+        tar xz -C "$bindir" --strip-components=2 -f "${RUNNER_TEMP}/gh.tgz" "gh_${GH_VERSION}_linux_${arch}/bin/gh"
         chmod +x "$bindir/gh"
         echo "$bindir" >> "$GITHUB_PATH"
         "$bindir/gh" --version

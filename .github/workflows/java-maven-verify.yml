@@ -10,8 +10,9 @@ name: Java Maven verify
 #     github_packages_repos: framework-sdk,framework-sdk-llm,db-init-flyway-spring-boot-starter
 #     enable_mysql: true
 #
-# 鉴权（403 时按序检查）：
-# 1. Org Secret GITHUB_PACKAGES_TOKEN 或 GHA_TOKEN（classic PAT，read:packages）
+# 鉴权（缺 PAT 即 fail-fast，不静默回落 github.token：GITHUB_TOKEN 拉不了跨仓 Maven Packages，
+# 回落只会把配置缺失转译成难排查的 401/403）：
+# 1. Org Secret GITHUB_PACKAGES_TOKEN 或 GHA_TOKEN（classic PAT，read:packages）；配置了 github_packages_repos 即必填
 # 2. PAT 所属账号对 SDK 源码仓库有 Read（Maven 无 npm 式 Manage Actions access；见 docs/java/maven-github-packages.md）
 # 3. caller permissions.packages: read
 # 4. pom.xml <repositories><url> 为 https://maven.pkg.github.com/workers-world/<repo>
@@ -22,6 +23,10 @@ on:
     inputs:
       ref:
         description: Checkout ref override（tag/branch），空则用 caller ref
+        type: string
+        default: ""
+      runner:
+        description: 覆盖 runs-on。公开仓 caller 的 fork PR 须传 ubuntu-latest，避免 Org Variable GHA_RUNNER 把 fork PR 路由到 self-hosted
         type: string
         default: ""
       java_version:
@@ -78,7 +83,7 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ${{ (vars.GHA_RUNNER != '' && vars.GHA_RUNNER || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || ((vars.GHA_RUNNER != '' && vars.GHA_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -90,6 +95,8 @@ jobs:
           ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
           # verify / package / SBOM 不依赖完整历史；浅克隆即可
           fetch-depth: 1
+          # 无 git 写操作；不持久化凭据（zizmor artipacked）
+          persist-credentials: false
 
       - name: Set up JDK
         uses: actions/setup-java@v6
@@ -100,6 +107,19 @@ jobs:
 
       - name: Ensure Maven CLI
         uses: workers-world/java-actions/.github/actions/ensure-maven@actions/v0.5.0
+
+      - name: Guard Packages credentials (fail-fast)
+        # GITHUB_TOKEN 拉不了跨仓 Maven Packages；缺 PAT 时显式报错，而非让 Maven 一路 401
+        if: ${{ inputs.github_packages_repos != '' }}
+        env:
+          PKG_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
+          ORG_TOKEN: ${{ secrets.GHA_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PKG_TOKEN}" ] && [ -z "${ORG_TOKEN}" ]; then
+            echo "::error::已配置 github_packages_repos 但未提供 GITHUB_PACKAGES_TOKEN / GHA_TOKEN（classic PAT，read:packages）。GITHUB_TOKEN 无法读取跨仓 Maven Packages，配置见 docs/java/maven-github-packages.md"
+            exit 1
+          fi
 
       - name: Remove stale Maven settings.xml
         if: ${{ inputs.github_packages_repos != '' }}
@@ -113,7 +133,8 @@ jobs:
           owner: ${{ inputs.github_packages_owner }}
           package_repos: ${{ inputs.github_packages_repos }}
           server_username: ${{ github.actor }}
-          server_password: ${{ secrets.GITHUB_PACKAGES_TOKEN || secrets.GHA_TOKEN || github.token }}
+          # Guard 已保证 PAT 存在；不再回落 github.token
+          server_password: ${{ secrets.GITHUB_PACKAGES_TOKEN || secrets.GHA_TOKEN }}
 
       - name: Start MySQL
         if: ${{ inputs.enable_mysql }}
@@ -127,6 +148,7 @@ jobs:
           echo "DB_PASSWORD=${MYSQL_ROOT_PASSWORD}" >> "$GITHUB_ENV"
           echo "DB_HOST=127.0.0.1" >> "$GITHUB_ENV"
           echo "DB_USERNAME=root" >> "$GITHUB_ENV"
+          # TODO(digest): mysql 改 digest pin（待有网环境 `docker buildx imagetools inspect mysql:8.0.36` 解析 sha256 后替换）
           docker run -d --name ci-mysql \
             -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
             -e MYSQL_DATABASE="$MYSQL_DATABASE" \
@@ -238,7 +260,7 @@ jobs:
 
       - name: Generate SBOM
         if: ${{ inputs.upload_release_artifacts && success() }}
-        # Pin full commit (tag v0.20.9 → 8e94d75…；核验：git ls-remote + release notes Syft v1.36.0 #546)
+        # Pin full commit（tag v0.24.0；升级时以 git ls-remote + anchore/sbom-action release notes 核验后同步本注释）
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           # path=待扫描目标（jar），file=SBOM 输出文件名；output-file 非有效输入会被忽略
@@ -257,4 +279,4 @@ jobs:
 
       - name: Cleanup Maven settings.xml
         if: always()
-        run: rm -f "$HOME/.m2/settings.xml"
+        run: rm -f "$HOME/.m2/settings.xml" "$HOME/.m2/settings.xml.bak"

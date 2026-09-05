@@ -50,6 +50,10 @@ on:
         description: 由 caller 判定是否应 publish（含 push + dev_* 分支等）；reusable 内勿再读 github.ref_*
         type: boolean
         default: false
+      runner:
+        description: 覆盖 runs-on（透传 nested verify/publish）。公开仓 caller 的 fork PR 场景须传 ubuntu-latest，避免 Org Variable 把 fork PR 路由到 self-hosted
+        type: string
+        default: ""
       concurrency_group:
         description: 可选；caller 传入时覆盖默认 concurrency group（多 caller 同 ref 须显式传唯一值，如含 github.workflow）
         type: string
@@ -85,12 +89,13 @@ jobs:
       maven_goals: ${{ inputs.maven_goals }}
       github_packages_owner: ${{ inputs.github_packages_owner }}
       github_packages_repos: ${{ inputs.github_packages_repos_for_verify }}
+      runner: ${{ inputs.runner }}
 
   # publish 前快速失败：token 缺失时勿一路跑到 Maven 403
   publish-guard:
     needs: verify
     if: ${{ inputs.publish_on_push }}
-    runs-on: ${{ (vars.GHA_RUNNER != '' && vars.GHA_RUNNER || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || ((vars.GHA_RUNNER != '' && vars.GHA_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 2
     permissions: {}
     steps:
@@ -123,3 +128,4 @@ jobs:
       java_version: ${{ inputs.java_version }}
       maven_deploy_args: ${{ inputs.maven_deploy_args }}
       github_packages_repos_for_auth: ${{ format('{0}:{1}', inputs.github_packages_repo, inputs.server_id) }}
+      runner: ${{ inputs.runner }}

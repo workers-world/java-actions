@@ -33,14 +33,18 @@ runs:
           )
           downloaded=0
           for url in "${urls[@]}"; do
-            rm -f "${tmp_tar}"
-            if curl -fsSL -o "${tmp_tar}" "${url}" && tar xzf "${tmp_tar}" -C "${RUNNER_TEMP}"; then
+            rm -f "${tmp_tar}" "${tmp_tar}.sha512"
+            # Apache 发行物同路径 .sha512 校验（防截断/投毒）+ --retry
+            if curl -fsSL --retry 3 -o "${tmp_tar}" "${url}" \
+              && curl -fsSL --retry 3 -o "${tmp_tar}.sha512" "${url}.sha512" \
+              && [ "$(awk '{print $1}' "${tmp_tar}.sha512" 2>/dev/null)" = "$(sha512sum "${tmp_tar}" | awk '{print $1}')" ] \
+              && tar xzf "${tmp_tar}" -C "${RUNNER_TEMP}"; then
               downloaded=1
-              rm -f "${tmp_tar}"
+              rm -f "${tmp_tar}" "${tmp_tar}.sha512"
               break
             fi
             echo "::warning::Maven download failed: ${url}"
-            rm -f "${tmp_tar}"
+            rm -f "${tmp_tar}" "${tmp_tar}.sha512"
           done
           if [ "${downloaded}" -ne 1 ]; then
             echo "::error::Could not download Maven ${MAVEN_VERSION} from Maven Central or Apache archive"
