@@ -261,7 +261,7 @@ jobs:
       - name: Generate SBOM
         if: ${{ inputs.upload_release_artifacts && success() }}
         # Pin full commit（tag v0.24.0；升级时以 git ls-remote + anchore/sbom-action release notes 核验后同步本注释）
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           # path=待扫描目标（jar），file=SBOM 输出文件名；output-file 非有效输入会被忽略
           path: ${{ steps.jar.outputs.path }}
