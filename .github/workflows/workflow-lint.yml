@@ -133,17 +133,29 @@ jobs:
         run: |
           set -euo pipefail
           # venv 安装（ubuntu runner 的 python 受 PEP 668 保护）；固定版本，升级须复核 zizmor.yml 基线
-          python3 -m venv "${RUNNER_TEMP}/zizmor-venv"
-          "${RUNNER_TEMP}/zizmor-venv/bin/pip" install --quiet --disable-pip-version-check \
-            "zizmor==${ZIZMOR_VERSION}"
-          echo "${RUNNER_TEMP}/zizmor-venv/bin" >> "$GITHUB_PATH"
-          zizmor --version
+          venv="${RUNNER_TEMP}/zizmor-venv"
+          zizmor_bin="${venv}/bin/zizmor"
+          python3 -m venv "$venv"
+          if [ ! -x "${venv}/bin/pip" ]; then
+            echo "::error::python3 -m venv 失败（缺 ensurepip / python3-venv？）"
+            exit 1
+          fi
+          "${venv}/bin/pip" install --disable-pip-version-check "zizmor==${ZIZMOR_VERSION}"
+          if [ ! -x "$zizmor_bin" ]; then
+            echo "::error::pip 未安装 zizmor 可执行文件: ${zizmor_bin}"
+            exit 1
+          fi
+          # GITHUB_PATH 仅对后续 step 生效；本 step 须直接调用 venv 内二进制
+          echo "${venv}/bin" >> "$GITHUB_PATH"
+          "$zizmor_bin" --version
 
       - name: zizmor（Actions 安全审计，≥medium 阻断）
+        env:
+          ZIZMOR_BIN: ${{ runner.temp }}/zizmor-venv/bin/zizmor
         run: |
           set -euo pipefail
           # 基线配置 zizmor.yml（每条 ignore 带理由）；composite 内用行内 ignore 标注
-          zizmor --no-progress --min-severity medium .
+          "$ZIZMOR_BIN" --no-progress --min-severity medium .
 
       - name: actionlint (workflows + composite actions)
         env:
