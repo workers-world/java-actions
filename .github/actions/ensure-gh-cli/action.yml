@@ -13,7 +13,7 @@ runs:
     - shell: bash
       env:
         GH_VERSION: ${{ inputs.gh_version }}
-      run: |
+      run: | # zizmor: ignore[github-env] — GITHUB_PATH 写入 RUNNER_TEMP/gha-bin，非不受信输入
         set -euo pipefail
         if command -v gh >/dev/null 2>&1; then
           gh --version
