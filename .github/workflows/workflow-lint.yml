@@ -96,7 +96,7 @@ jobs:
           base="https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}"
           curl -fsSL --retry 3 "${base}/${tarball}" -o "${RUNNER_TEMP}/shellcheck.tar.xz"
           # 完整性校验（对齐 actionlint 步骤的官方 checksum 校验，勿再「下载即解压」）：
-          # shellcheck release 未附独立 checksums 资产时，SHA256 发布在 release notes 正文，
+          # koalaman/shellcheck 发行版未附独立 checksums 资产时，SHA256 发布在 release notes 正文，
           # 故先试 checksums 资产文件、再从 release body 提取；两者都拿不到即 fail-closed。
           # TODO(audit-2026-09-17): 审计环境外网不可达，未能在线核实 release 资产/正文格式。
           #   首次运行若提取失败，人工到
