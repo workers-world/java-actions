@@ -20,33 +20,61 @@ on:
         type: string
         default: ""
 
-permissions:
-  contents: write
-  pull-requests: write
+# 写权限仅 tag job 需要；gate 只读 commit subject（对齐 worker-actions，避免 workflow 级 permissions 导致 GHA 不注册）
+permissions: {}
 
 concurrency:
   group: release-actions-bundle
   cancel-in-progress: false
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+    steps:
+      - id: check
+        env:
+          SUBJECT: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          if [[ "$SUBJECT" == *'[skip actions-release]'* ]]; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "Skip release: commit subject contains [skip actions-release]"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
   tag:
     runs-on: ubuntu-latest
-    # 避免 bot 回填 manifest 的 PR 合入后再打 tag（commit 含 skip 标记）
+    needs: gate
+    permissions:
+      contents: write
+      pull-requests: write
     if: >
-      github.event_name == 'workflow_dispatch' ||
+      always() &&
       (
-        github.event_name == 'push' &&
-        !contains(github.event.head_commit.message, '[skip actions-release]')
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event_name == 'push' &&
+          needs.gate.result == 'success' &&
+          needs.gate.outputs.proceed == 'true'
+        )
       )
+    env:
+      RELEASE_BOT_APP_ID_EFFECTIVE: ${{ vars.RELEASE_BOT_APP_ID }}
     steps:
       # App 通道（可选）：配置 RELEASE_BOT_APP_ID 变量 + RELEASE_BOT_PRIVATE_KEY Secret 后自动启用；
       # 未配置时保持 GHA_TOKEN/GITHUB_TOKEN。tag push 须由 App/PAT 发起（GITHUB_TOKEN 不触发下游 workflow）
       - name: Mint GitHub App token
         id: bot-token
-        if: vars.RELEASE_BOT_APP_ID != ''
+        if: env.RELEASE_BOT_APP_ID_EFFECTIVE != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          app-id: ${{ env.RELEASE_BOT_APP_ID_EFFECTIVE }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
           # owner/repositories 均不传 → token 仅限当前仓（v3 语义；zizmor github-app 要求）
           permission-contents: write

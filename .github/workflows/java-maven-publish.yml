@@ -91,15 +91,19 @@ jobs:
 
       - name: Guard Packages credentials (fail-fast)
         # 本仓发布可用 github.token（permissions.packages: write）；跨仓发布必须 classic PAT
+        # github_packages_repo 是裸仓名（无 owner，如 framework-sdk），github.repository 是
+        # owner/repo 形态：直接比较恒不相等（会误杀本仓发布路径），须先用 github.repository_owner
+        # 归一化为 OWNER/REPO 再比较
         env:
           PKG_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
           ORG_TOKEN: ${{ secrets.GHA_TOKEN }}
           TARGET_REPO: ${{ inputs.github_packages_repo }}
           CALLER_REPO: ${{ github.repository }}
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
-          if [ -z "${PKG_TOKEN}" ] && [ -z "${ORG_TOKEN}" ] && [ "${TARGET_REPO}" != "${CALLER_REPO}" ]; then
-            echo "::error::发布目标 ${TARGET_REPO} ≠ 本仓 ${CALLER_REPO}：GITHUB_TOKEN 只能发布到本仓 Packages，跨仓发布须提供 GITHUB_PACKAGES_TOKEN / GHA_TOKEN（write:packages），见 docs/java/maven-github-packages.md"
+          if [ -z "${PKG_TOKEN}" ] && [ -z "${ORG_TOKEN}" ] && [ "${REPO_OWNER}/${TARGET_REPO}" != "${CALLER_REPO}" ]; then
+            echo "::error::发布目标 ${REPO_OWNER}/${TARGET_REPO} ≠ 本仓 ${CALLER_REPO}：GITHUB_TOKEN 只能发布到本仓 Packages，跨仓发布须提供 GITHUB_PACKAGES_TOKEN / GHA_TOKEN（write:packages），见 docs/java/maven-github-packages.md"
             exit 1
           fi
 

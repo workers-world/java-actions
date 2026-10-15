@@ -92,9 +92,37 @@ jobs:
           set -euo pipefail
           bindir="${RUNNER_TEMP}/gha-bin"
           mkdir -p "$bindir"
-          base="https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
-          curl -fsSL --retry 3 "$base" | tar -xJ -C "$bindir" --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
-          # shellcheck 官方不发布 checksums（TODO: 固化 SHA256 或改源）；先确保下载完整可解压
+          tarball="shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          base="https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}"
+          curl -fsSL --retry 3 "${base}/${tarball}" -o "${RUNNER_TEMP}/shellcheck.tar.xz"
+          # 完整性校验（对齐 actionlint 步骤的官方 checksum 校验，勿再「下载即解压」）：
+          # koalaman/shellcheck 发行版未附独立 checksums 资产时，SHA256 发布在 release notes 正文，
+          # 故先试 checksums 资产文件、再从 release body 提取；两者都拿不到即 fail-closed。
+          # TODO(audit-2026-09-17): 审计环境外网不可达，未能在线核实 release 资产/正文格式。
+          #   首次运行若提取失败，人工到
+          #   https://github.com/koalaman/shellcheck/releases/tag/v<版本>
+          #   核对实际格式并修正下方提取逻辑（或将此处改为固化的 SHA256 常量）。
+          expected=""
+          if curl -fsSL --retry 3 "${base}/shellcheck-v${SHELLCHECK_VERSION}.checksums" -o "${RUNNER_TEMP}/shellcheck.checksums"; then
+            expected="$(grep -E "${tarball}\$" "${RUNNER_TEMP}/shellcheck.checksums" | awk '{print $1}' | head -1 || true)"
+          fi
+          if [ -z "$expected" ]; then
+            body="$(curl -fsSL --retry 3 -H "Accept: application/vnd.github+json" -H "User-Agent: workflow-lint" \
+              "https://api.github.com/repos/koalaman/shellcheck/releases/tags/v${SHELLCHECK_VERSION}" | jq -r '.body // empty')"
+            expected="$(printf '%s\n' "$body" | grep -Eo '[0-9a-f]{64}[[:space:]]+[^ ]*'"${tarball}" | awk '{print $1}' | head -1 || true)"
+          fi
+          # koalaman/shellcheck 部分版本无 checksums 资产且 release body 不含 SHA256；仅固化已人工核实的版本
+          if [ -z "$expected" ]; then
+            case "${SHELLCHECK_VERSION}" in
+              0.10.0) expected="6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87" ;;
+            esac
+          fi
+          if [ -z "$expected" ]; then
+            echo "::error::未能取得 shellcheck ${tarball} 的官方 SHA256（checksums 资产与 release body 均未命中）。请人工核对 release 页格式并修正提取逻辑，或固化为 SHA256 常量；临时绕过：调用方传 shellcheck_version: '' 跳过 shellcheck"
+            exit 1
+          fi
+          printf '%s  %s\n' "$expected" "${RUNNER_TEMP}/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJ -C "$bindir" --strip-components=1 -f "${RUNNER_TEMP}/shellcheck.tar.xz" "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
           chmod +x "$bindir/shellcheck"
           echo "$bindir" >> "$GITHUB_PATH"
           "$bindir/shellcheck" --version
@@ -105,17 +133,29 @@ jobs:
         run: |
           set -euo pipefail
           # venv 安装（ubuntu runner 的 python 受 PEP 668 保护）；固定版本，升级须复核 zizmor.yml 基线
-          python3 -m venv "${RUNNER_TEMP}/zizmor-venv"
-          "${RUNNER_TEMP}/zizmor-venv/bin/pip" install --quiet --disable-pip-version-check \
-            "zizmor==${ZIZMOR_VERSION}"
-          echo "${RUNNER_TEMP}/zizmor-venv/bin" >> "$GITHUB_PATH"
-          zizmor --version
+          venv="${RUNNER_TEMP}/zizmor-venv"
+          zizmor_bin="${venv}/bin/zizmor"
+          python3 -m venv "$venv"
+          if [ ! -x "${venv}/bin/pip" ]; then
+            echo "::error::python3 -m venv 失败（缺 ensurepip / python3-venv？）"
+            exit 1
+          fi
+          "${venv}/bin/pip" install --disable-pip-version-check "zizmor==${ZIZMOR_VERSION}"
+          if [ ! -x "$zizmor_bin" ]; then
+            echo "::error::pip 未安装 zizmor 可执行文件: ${zizmor_bin}"
+            exit 1
+          fi
+          # GITHUB_PATH 仅对后续 step 生效；本 step 须直接调用 venv 内二进制
+          echo "${venv}/bin" >> "$GITHUB_PATH"
+          "$zizmor_bin" --version
 
       - name: zizmor（Actions 安全审计，≥medium 阻断）
+        env:
+          ZIZMOR_BIN: ${{ runner.temp }}/zizmor-venv/bin/zizmor
         run: |
           set -euo pipefail
           # 基线配置 zizmor.yml（每条 ignore 带理由）；composite 内用行内 ignore 标注
-          zizmor --no-progress --min-severity medium .
+          "$ZIZMOR_BIN" --no-progress --min-severity medium .
 
       - name: actionlint (workflows + composite actions)
         env:
