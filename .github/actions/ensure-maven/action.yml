@@ -13,7 +13,7 @@ runs:
     - shell: bash
       env:
         MAVEN_VERSION: ${{ inputs.maven_version }}
-      run: |
+      run: | # zizmor: ignore[github-env] — GITHUB_PATH 写入 RUNNER_TEMP 下固定 Maven 安装路径，非不受信输入
         set -euo pipefail
 
         install_dir="${RUNNER_TEMP}/apache-maven-${MAVEN_VERSION}"
