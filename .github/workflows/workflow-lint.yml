@@ -111,6 +111,12 @@ jobs:
               "https://api.github.com/repos/koalaman/shellcheck/releases/tags/v${SHELLCHECK_VERSION}" | jq -r '.body // empty')"
             expected="$(printf '%s\n' "$body" | grep -Eo '[0-9a-f]{64}[[:space:]]+[^ ]*'"${tarball}" | awk '{print $1}' | head -1 || true)"
           fi
+          # koalaman/shellcheck 部分版本无 checksums 资产且 release body 不含 SHA256；仅固化已人工核实的版本
+          if [ -z "$expected" ]; then
+            case "${SHELLCHECK_VERSION}" in
+              0.10.0) expected="6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87" ;;
+            esac
+          fi
           if [ -z "$expected" ]; then
             echo "::error::未能取得 shellcheck ${tarball} 的官方 SHA256（checksums 资产与 release body 均未命中）。请人工核对 release 页格式并修正提取逻辑，或固化为 SHA256 常量；临时绕过：调用方传 shellcheck_version: '' 跳过 shellcheck"
             exit 1
