@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   release:
-    uses: workers-world/worker-actions/.github/workflows/create-gh-release.yml@actions/v0.2.30
+    uses: workers-world/worker-actions/.github/workflows/create-gh-release.yml@actions/v0.2.33
     # 不传 secrets：leaf 内 GHA_TOKEN 为空时回退 GITHUB_TOKEN；tag 由本仓 release-actions-bundle 打出，无跨仓 PAT 需求
     with:
       tag_name: ${{ github.ref_name }}
