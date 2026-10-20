@@ -1,12 +1,12 @@
 name: Workflow lint
 
-# 廉价前置门禁（不调 LLM，不产生 cost）：在 OCR 之前 fast-fail。
+# 廉价前置门禁（不调 LLM，不产生 cost）：在重型 CI job 之前 fast-fail。
 # 检查项：
 #   1. actionlint：YAML/GHA 语法、表达式类型、shell 注入、reusable workflow（composite 经引用校验）
 #   2. shellcheck（actionlint 集成）：run: 块 shell 脚本
 #   3. zizmor：Actions 安全审计（template-injection / permissions / unpinned-uses 等；
 #      基线配置 zizmor.yml，--min-severity medium 起判；composite 内用行内 ignore 标注理由）
-#   4. JSON / YAML 解析：.opencodereview/rule.json、manifest/actions-bundle.yaml
+#   4. JSON / YAML 解析：manifest/actions-bundle.yaml
 #   5. Pin 检查：uses: 禁止 @master / @main / @HEAD（扫 .github/** 与 templates/**）
 #   6. 内层 pin 一致性：按来源仓（java-actions / worker-actions）分组，@actions/vX.Y.Z 各组全仓同版本
 #   7. manifest 格式：current 须为 actions/vX.Y.Z（不校验 tag 是否已 push；发版 PR 中 manifest 常领先 tag）
@@ -181,15 +181,6 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
-          # .opencodereview/rule.json
-          if [ -f .opencodereview/rule.json ]; then
-            if ! node -e "JSON.parse(require('fs').readFileSync('.opencodereview/rule.json','utf8'))" 2>/tmp/json.err; then
-              echo "::error::.opencodereview/rule.json 解析失败: $(cat /tmp/json.err)"
-              fail=1
-            else
-              echo "ok: .opencodereview/rule.json"
-            fi
-          fi
           # manifest/actions-bundle.yaml
           if [ -f manifest/actions-bundle.yaml ]; then
             if ! node -e "require('fs').readFileSync('manifest/actions-bundle.yaml','utf8').split('\n').forEach(l=>{if(!/^#/.test(l)&&/current:/.test(l)){const m=l.match(/current:\s*(\S+)/);if(!m)throw new Error('current: 行解析失败: '+l)}})" 2>/tmp/yaml.err; then

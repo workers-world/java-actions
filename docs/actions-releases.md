@@ -15,4 +15,4 @@ Java 仓通过 **semver tag** 引用可复用 workflow，**禁止** `@master`。
 
 先有 tag，再 bump 消费者。
 
-Worker 侧 Release PR / OCR / Qodana 见 [workers-world/worker-actions](https://github.com/workers-world/worker-actions)。
+Worker 侧 Release PR / Qodana 见 [workers-world/worker-actions](https://github.com/workers-world/worker-actions)。

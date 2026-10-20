@@ -51,25 +51,8 @@ jobs:
     with:
       pr_number: ${{ format('{0}', github.event.pull_request.number) }}
 
-  ocr:
-    if: |
-      github.event_name == 'pull_request' &&
-      contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action) &&
-      github.base_ref == 'master' &&
-      startsWith(github.head_ref, 'dev_') &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    permissions:
-      contents: read
-      pull-requests: write
-      # nested open-code-review 需 actions: write（actions/cache session save）
-      actions: write
-    uses: workers-world/worker-actions/.github/workflows/open-code-review.yml@actions/v0.2.30
-    secrets: inherit
-    with:
-      rule: .opencodereview/rule.json
-
   release-auto-merge:
-    needs: [verify, qodana, ocr]
+    needs: [verify, qodana]
     if: |
       always() &&
       github.event_name == 'pull_request' &&
@@ -79,8 +62,7 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.draft == false &&
       needs.verify.result == 'success' &&
-      needs.qodana.result == 'success' &&
-      needs.ocr.result == 'success'
+      needs.qodana.result == 'success'
     permissions: {}
     uses: workers-world/worker-actions/.github/workflows/worker-release-auto-merge.yml@actions/v0.2.30
     secrets: inherit
@@ -89,7 +71,7 @@ jobs:
       head_ref: ${{ github.head_ref }}
 
   notify-blocked:
-    needs: [verify, qodana, ocr, release-auto-merge]
+    needs: [verify, qodana, release-auto-merge]
     # nested notify 拉 annotations 需要 checks/actions: read；caller 须授予（不可 permissions: {}）
     permissions:
       actions: read
@@ -105,17 +87,14 @@ jobs:
       needs.release-auto-merge.result != 'success' &&
       needs.verify.result != 'cancelled' &&
       needs.qodana.result != 'cancelled' &&
-      needs.ocr.result != 'cancelled' &&
       (
         needs.verify.result == 'failure' ||
         needs.qodana.result == 'failure' ||
-        needs.ocr.result == 'failure' ||
         needs.release-auto-merge.result == 'failure' ||
         (
           needs.release-auto-merge.result == 'skipped' &&
           needs.verify.result == 'success' &&
-          needs.qodana.result == 'success' &&
-          needs.ocr.result == 'success'
+          needs.qodana.result == 'success'
         )
       )
     uses: workers-world/worker-actions/.github/workflows/worker-notify-release-pr-blocked.yml@actions/v0.2.30
@@ -126,5 +105,4 @@ jobs:
       pr_url: ${{ github.event.pull_request.html_url }}
       verify_result: ${{ needs.verify.result }}
       qodana_result: ${{ needs.qodana.result }}
-      ocr_result: ${{ needs.ocr.result }}
       merge_result: ${{ needs.release-auto-merge.result }}
