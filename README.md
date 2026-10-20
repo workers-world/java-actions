@@ -4,7 +4,7 @@ Java / Maven 仓可复用的 GitHub Actions（verify、Packages publish、SDK CI
 
 许可证由 GitHub 建仓时生成（MIT）。**不要** `@master`，pin `actions/vX.Y.Z`。
 
-Worker CI（Release PR / Qodana / OCR）在独立仓：[workers-world/worker-actions](https://github.com/workers-world/worker-actions)。Java 业务仓模板会同时 `uses` 两个仓。
+Worker CI（Release PR / Qodana）在独立仓：[workers-world/worker-actions](https://github.com/workers-world/worker-actions)。Java 业务仓模板会同时 `uses` 两个仓。
 
 ## Caller
 

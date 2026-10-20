@@ -14,7 +14,7 @@
 
 Composite：[configure-maven-github-packages](../.github/actions/java/configure-maven-github-packages/action.yml)、[ensure-maven](../.github/actions/ensure-maven/action.yml)。
 
-Release PR（qodana / OCR / auto-merge）仍用 [workers-world/worker-actions](https://github.com/workers-world/worker-actions)；Java 业务仓模板见 [templates/java/ci-release-pr.yml](../templates/java/ci-release-pr.yml)。
+Release PR（qodana / auto-merge）仍用 [workers-world/worker-actions](https://github.com/workers-world/worker-actions)；Java 业务仓模板见 [templates/java/ci-release-pr.yml](../templates/java/ci-release-pr.yml)。
 
 ## Maven 与 npm 权限差异
 
