@@ -1,5 +1,5 @@
 # Dependabot：每周 bump GitHub Actions。
-# 本仓无根/tools package.json，暂不扫 npm。合入后走既有 Release PR 链。
+# 根 package.json 无 npm 依赖（仅供 box-test npm ci）；暂不扫 npm。合入后走既有 Release PR 链。
 # 注：composite action 目录内的 uses（action.yml）默认不被 "/" 扫描，
 # 须显式列出 directories（dependabot-core#6704）。
 version: 2
