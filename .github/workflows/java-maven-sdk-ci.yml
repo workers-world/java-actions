@@ -80,7 +80,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: workers-world/java-actions/.github/workflows/java-maven-verify.yml@actions/v0.5.0
+    uses: workers-world/java-actions/.github/workflows/java-maven-verify.yml@actions/v0.5.2
     secrets:
       GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
       GHA_TOKEN: ${{ secrets.GHA_TOKEN }}
@@ -117,7 +117,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: workers-world/java-actions/.github/workflows/java-maven-publish.yml@actions/v0.5.0
+    uses: workers-world/java-actions/.github/workflows/java-maven-publish.yml@actions/v0.5.2
     secrets:
       GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
       GHA_TOKEN: ${{ secrets.GHA_TOKEN }}
