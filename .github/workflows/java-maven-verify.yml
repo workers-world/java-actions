@@ -4,7 +4,7 @@ name: Java Maven verify
 #
 # Caller 典型用法：
 #   permissions: { contents: read, packages: read }
-#   uses: workers-world/java-actions/.github/workflows/java-maven-verify.yml@actions/v0.5.0
+#   uses: workers-world/java-actions/.github/workflows/java-maven-verify.yml@actions/v0.5.2
 #   secrets: inherit
 #   with:
 #     github_packages_repos: framework-sdk,framework-sdk-llm,db-init-flyway-spring-boot-starter
@@ -106,7 +106,7 @@ jobs:
           cache: maven
 
       - name: Ensure Maven CLI
-        uses: workers-world/java-actions/.github/actions/ensure-maven@actions/v0.5.0
+        uses: workers-world/java-actions/.github/actions/ensure-maven@actions/v0.5.2
 
       - name: Guard Packages credentials (fail-fast)
         # GITHUB_TOKEN 拉不了跨仓 Maven Packages；缺 PAT 时显式报错，而非让 Maven 一路 401
@@ -128,7 +128,7 @@ jobs:
       - name: Configure Maven GitHub Packages auth
         if: ${{ inputs.github_packages_repos != '' }}
         # Pin 与 bundle 同版本 tag
-        uses: workers-world/java-actions/.github/actions/java/configure-maven-github-packages@actions/v0.5.0
+        uses: workers-world/java-actions/.github/actions/java/configure-maven-github-packages@actions/v0.5.2
         with:
           owner: ${{ inputs.github_packages_owner }}
           package_repos: ${{ inputs.github_packages_repos }}

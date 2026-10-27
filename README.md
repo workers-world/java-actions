@@ -16,7 +16,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: workers-world/java-actions/.github/workflows/java-maven-sdk-ci.yml@actions/v0.5.0
+    uses: workers-world/java-actions/.github/workflows/java-maven-sdk-ci.yml@actions/v0.5.2
     secrets: inherit
     with:
       github_packages_repo: your-sdk-repo
@@ -33,7 +33,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: workers-world/java-actions/.github/workflows/java-maven-verify.yml@actions/v0.5.0
+    uses: workers-world/java-actions/.github/workflows/java-maven-verify.yml@actions/v0.5.2
     secrets: inherit
     with:
       github_packages_repos: your-sdk:github-your-sdk
@@ -42,7 +42,7 @@ jobs:
 
 模板：[templates/java/](templates/java/)。说明：[docs/java/maven-github-packages.md](docs/java/maven-github-packages.md)。
 
-嵌套 composite 已 pin 全路径 `workers-world/java-actions/.github/actions/…@actions/v0.5.0`（勿用 `$/`）。
+嵌套 composite 已 pin 全路径 `workers-world/java-actions/.github/actions/…@actions/v0.5.2`（勿用 `$/`）。
 
 ## 调用方配置（名称，不含值）
 
