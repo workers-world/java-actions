@@ -106,10 +106,14 @@ jobs:
           if curl -fsSL --retry 3 "${base}/shellcheck-v${SHELLCHECK_VERSION}.checksums" -o "${RUNNER_TEMP}/shellcheck.checksums"; then
             expected="$(grep -E "${tarball}\$" "${RUNNER_TEMP}/shellcheck.checksums" | awk '{print $1}' | head -1 || true)"
           fi
+          # release body 经 GitHub API 获取；未认证/限速等失败时不应中断步骤（后续仍有固化 SHA 与 fail-closed）
           if [ -z "$expected" ]; then
-            body="$(curl -fsSL --retry 3 -H "Accept: application/vnd.github+json" -H "User-Agent: workflow-lint" \
-              "https://api.github.com/repos/koalaman/shellcheck/releases/tags/v${SHELLCHECK_VERSION}" | jq -r '.body // empty')"
-            expected="$(printf '%s\n' "$body" | grep -Eo '[0-9a-f]{64}[[:space:]]+[^ ]*'"${tarball}" | awk '{print $1}' | head -1 || true)"
+            release_json="${RUNNER_TEMP}/shellcheck-release.json"
+            if curl -fsSL --retry 3 -H "Accept: application/vnd.github+json" -H "User-Agent: workflow-lint" \
+              "https://api.github.com/repos/koalaman/shellcheck/releases/tags/v${SHELLCHECK_VERSION}" -o "${release_json}"; then
+              body="$(jq -r '.body // empty' "${release_json}")"
+              expected="$(printf '%s\n' "$body" | grep -Eo '[0-9a-f]{64}[[:space:]]+[^ ]*'"${tarball}" | awk '{print $1}' | head -1 || true)"
+            fi
           fi
           # koalaman/shellcheck 部分版本无 checksums 资产且 release body 不含 SHA256；仅固化已人工核实的版本
           if [ -z "$expected" ]; then
