@@ -1,6 +1,6 @@
 {
   "name": "@workers-world/java-actions",
-  "version": "0.0.0",
+  "version": "0.5.4",
   "private": true,
   "description": "workers-world Java / Maven GitHub Actions bundle (root lockfile for npm ci / box tests)",
   "license": "MIT"
