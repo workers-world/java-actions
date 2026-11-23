@@ -56,3 +56,7 @@ jobs:
 `java-maven-publish` **禁止**挂到 `pull_request` / `pull_request_target`。
 
 本仓自己的 CI **写死 `ubuntu-latest`**。
+
+## 发版
+
+版本权威 = [package.json](package.json) `version`（对齐 `worker-actions` / SDK 语义）：**人工开 Release PR**（`dev_*` → `master`），在 PR 里**本地 bump** `version` → 合入 `master` → [`release-actions-bundle`](.github/workflows/release-actions-bundle.yml) 打 `actions/v{version}` → GitHub Release 页；未 bump 则跳过。CI 含**发版闸**（`release-gate`）：触及产品文件但未 bump 会 fail。
